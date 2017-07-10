@@ -1,50 +1,90 @@
-var sqlite3 = require('sqlite3').verbose(),
-		db = new sqlite3.Database('/home/andrei/ctx/core/data'),
-		l = function(o) {console.log(o);},
-		terms = process.argv.slice(2);
+var l = function(o) {console.log(o); return o;},
+		elasticlunr = require('elasticlunr'),
+		fs = require('fs');
 
-// db.each("SELECT * FROM items", function(err, row) { l(row); });
-// db.each("SELECT * FROM tags", function(err, row) { l(row); });
-// return;
+module.exports = function(path) {
+	this.path = path;
+	var parts = load(path);
+	this.index = parts[0];
+	this.nextId = parts[1];
+	this.docs = this.index.documentStore;
+	this.put = put.bind(this);
+	this.get = get.bind(this);
+};	
 
-if(!terms.length) { db.close(); return; }
-
-db.run("INSERT INTO items (body) VALUES (?)", terms.join(' '), function(err) {
-	if(err)	{ l(err); return; }
-	
-	var id = this.lastID,
-			pts = db.prepare('INSERT INTO tags VALUES (?, ?)'),
-			dts = db.prepare('DELETE FROM tags WHERE itemId = ?'),
-			uis = db.prepare('UPDATE items SET body = ? WHERE id = ?'),
-			dis = db.prepare('DELETE FROM items WHERE id = ?'),
-			gis = db.prepare('SELECT * FROM items WHERE id = ?');	
-			
-	function putTags (id, terms) {
-		terms
-			.filter(t => t.startsWith('.'))
-			.forEach(t => pts.run(id, t.slice(1)));
-	};
-			
-	putTags(id, terms);
-	l(id);
-	
-	if (terms.length > 1) {
-		if(terms[0] == '.delete') {
-			dis.run(terms[1]);
-			dts.run(terms[1]);
-		}
-		
-		else if(terms[0] == '.update') {
-			uis.run(terms.slice(2).join(' '), terms[1]);
-			dts.run(terms[1], () => putTags(terms[1], terms.slice(2)));
-		}
-		
-		else if(terms[0] == '.watch')
-			gis.get(terms[1], (err, row) => {
-				var tags = row.body.split(' ').filter(t => !t.startsWith('.')),
-						s = tags.map((t, i) => `JOIN tags T${i} ON T${i}.itemId = I.id AND T${i}.tag = ?`).join(' ');
-				
-				db.each("SELECT I.* FROM items I " + s, tags, (err, row) => l(row.body + ' =' + row.id));
-			});
+function load(path) {
+	try {
+		var o = JSON.parse(fs.readFileSync(path, 'utf8'));
+		return [elasticlunr.Index.load(o), o.nextId || 1234];
 	}
-});
+	catch (ex) {
+		var index = new elasticlunr.Index();
+		index.addField('tags');
+		index.setRef('id');
+		return [index, 1234];
+	}
+}
+
+function save(core) {
+	var o = core.index.toJSON();
+	o.nextId = core.nextId;
+	fs.writeFile(core.path, JSON.stringify(o));
+}
+
+function put(text) {
+	if(!text) return null;
+	var words = text.trim().split(' ').filter(w => !!w),
+			tags = words.filter(w => {var l = w[0]; return l != '~' && l == l.toUpperCase();}).map(t => t.toLowerCase()),
+			maybeId = words[words.length - 1],
+			id = maybeId.startsWith('~') && maybeId.length > 1 ? maybeId.slice(1) : null,
+			idExists = id ? this.docs.hasDoc(id) : false;
+	
+	tags.filter(t => t.indexOf('.') != -1).forEach(ct => Array.prototype.push.apply(tags, ct.split('.')));
+	if(!tags.length) tags.push('untagged');
+	
+	// l(text);	l(words);	l(tags);	l(maybeId);	l(id);	l(idExists);	return '';
+
+	if(idExists)
+		if(words.length == 1)
+			this.index.removeDocByRef(id);
+		else
+			this.index.updateDoc({id: id, tags: tags, body: text});
+	else 
+		if(id && words.length == 1)
+			return;
+		else {
+			if(!id) {
+				id = this.nextId++;	
+				text += ' ~' + id;
+			}
+			
+			this.index.addDoc({id: id, tags: tags, body: text});
+		}
+	
+	save(this);
+	
+	return '~' + id;
+}
+
+function get(text) {
+	// l(this.docs.docs); return; 
+	var tags = text.split(' ').filter(w => !!w).map(t => t.toLowerCase()),
+			ptags = tags.filter(t => t[0] != '-'),
+			ntags = tags.filter(t => t[0] == '-').map(t => t.slice(1));
+	return this.index.search(ptags.join(' '), {bool: 'AND'})
+		.map(r => this.docs.getDoc(r.ref))
+		.filter(doc => ntags.every(nt => doc.tags.indexOf(nt) == -1))
+		.map(doc => {
+			var	body = doc.body,
+					sep = body.search(/(^|\s+)[^A-Z\s]/);
+			return (body.slice(0, sep).split(' ').filter(t => !!t && ptags.indexOf(t.toLowerCase()) == -1).join(' ') + body.slice(sep)).trim();		
+		});
+}
+
+
+	
+
+
+
+
+
