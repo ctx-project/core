@@ -10,6 +10,7 @@ module.exports = function(path) {
 	this.docs = this.index.documentStore;
 	this.put = put.bind(this);
 	this.get = get.bind(this);
+	this.onPut = null;
 };	
 
 function load(path) {
@@ -40,6 +41,7 @@ function put(text) {
 			idExists = id ? this.docs.hasDoc(id) : false;
 	
 	tags.filter(t => t.indexOf('.') != -1).forEach(ct => Array.prototype.push.apply(tags, ct.split('.')));
+	tags.filter(t => t.indexOf(':') != -1).forEach(ct => Array.prototype.push.apply(tags, ct.split(':')));
 	if(!tags.length) tags.push('untagged');
 	
 	// l(text);	l(words);	l(tags);	l(maybeId);	l(id);	l(idExists);	return '';
@@ -61,6 +63,8 @@ function put(text) {
 			this.index.addDoc({id: id, tags: tags, body: text});
 		}
 	
+	if(this.onPut) setTimeout(() => this.onPut(text));
+	
 	save(this);
 	
 	return '~' + id;
@@ -76,7 +80,7 @@ function get(text) {
 		.filter(doc => ntags.every(nt => doc.tags.indexOf(nt) == -1))
 		.map(doc => {
 			var	body = doc.body,
-					sep = body.search(/(^|\s+)[^A-Z\s]/);
+					sep = body.search(/(^|\s+)[^A-Z\s\*]/);
 			return (body.slice(0, sep).split(' ').filter(t => !!t && ptags.indexOf(t.toLowerCase()) == -1).join(' ') + body.slice(sep)).trim();		
 		});
 }
