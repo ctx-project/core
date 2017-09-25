@@ -4,53 +4,84 @@ var l = function(o) {console.log(o); return o;},
 
 module.exports = function(path) {
 	this.path = path;
-	var parts = load(path);
-	this.index = parts[0];
-	this.nextId = parts[1];
-	this.docs = this.index.documentStore;
+	var store = load(path);
+	this.items = store.items;
+	this.nextId = store.nextId;
+	this.tags = store.tags;
+	this.docs = this.items.documentStore;
 	this.put = put.bind(this);
 	this.get = get.bind(this);
 	this.onPut = null;
+	this.hint = hint.bind(this);
+
+	// var docs = this.docs.docs;
+	// for(var docid in docs) {
+	// 	this.put(docs[docid].body);
+	// }
+	
+	// // l(this.tags.toJSON());
+	// save(this);
+	// // l(this.items.toJSON());
 };	
 
 function load(path) {
 	try {
-		var o = JSON.parse(fs.readFileSync(path, 'utf8'));
-		return [elasticlunr.Index.load(o), o.nextId || 1234];
+		var store = JSON.parse(fs.readFileSync(path, 'utf8'));
+		return {
+			items: elasticlunr.Index.load(store.items), 
+			nextId: store.nextId,
+			tags: elasticlunr.Index.load(store.tags)
+		};
 	}
 	catch (ex) {
-		var index = new elasticlunr.Index();
-		index.addField('tags');
-		index.setRef('id');
-		return [index, 1234];
+		var items = new elasticlunr.Index();
+		items.addField('tags');
+		items.setRef('id');
+		
+		var tags = new elasticlunr.Index();
+		tags.addField('parts');
+		tags.setRef('tag');
+		
+		return {items, tags, nextId: 1234};
 	}
 }
 
 function save(core) {
-	var o = core.index.toJSON();
-	o.nextId = core.nextId;
-	fs.writeFile(core.path, JSON.stringify(o));
+	fs.writeFile(core.path, JSON.stringify({
+		items: core.items.toJSON(),
+		nextId: core.nextId,
+		tags: core.tags.toJSON()
+	}));
 }
 
 function put(text) {
 	if(!text) return null;
 	var words = text.trim().split(' ').filter(w => !!w),
-			tags = words.filter(w => {var l = w[0]; return l != '~' && l == l.toUpperCase();}).map(t => t.toLowerCase()),
+			tags = words.filter(w => {var l = w[0]; return l != '~' && l == l.toUpperCase() && isNaN(l);}).map(t => t.toLowerCase()),
 			maybeId = words[words.length - 1],
 			id = maybeId.startsWith('~') && maybeId.length > 1 ? maybeId.slice(1) : null,
 			idExists = id ? this.docs.hasDoc(id) : false;
 	
-	tags.filter(t => t.indexOf('.') != -1).forEach(ct => Array.prototype.push.apply(tags, ct.split('.')));
-	tags.filter(t => t.indexOf(':') != -1).forEach(ct => Array.prototype.push.apply(tags, ct.split(':')));
+	tags.forEach(function(tag) {
+		if(this.tags.documentStore.hasDoc(tag)) return;
+		this.tags.addDoc({tag: tag, parts: tag.split(/[\.:]+/)});	
+	}.bind(this));
+	
+	function subtags(sep) {
+		tags.filter(t => t.indexOf(sep) != -1).forEach(ct => Array.prototype.push.apply(tags, ct.split(sep).filter(t => !isNaN(+t))));
+	}
+	subtags(':');
+	subtags('.');
+
 	if(!tags.length) tags.push('untagged');
 	
 	// l(text);	l(words);	l(tags);	l(maybeId);	l(id);	l(idExists);	return '';
 
 	if(idExists)
 		if(words.length == 1)
-			this.index.removeDocByRef(id);
+			this.items.removeDocByRef(id);
 		else
-			this.index.updateDoc({id: id, tags: tags, body: text});
+			this.items.updateDoc({id: id, tags: tags, body: text});
 	else 
 		if(id && words.length == 1)
 			return;
@@ -60,7 +91,7 @@ function put(text) {
 				text += ' ~' + id;
 			}
 			
-			this.index.addDoc({id: id, tags: tags, body: text});
+			this.items.addDoc({id: id, tags: tags, body: text});
 		}
 	
 	if(this.onPut) setTimeout(() => this.onPut(text));
@@ -75,7 +106,7 @@ function get(text) {
 	var tags = text.split(' ').filter(w => !!w).map(t => t.toLowerCase()),
 			ptags = tags.filter(t => t[0] != '-'),
 			ntags = tags.filter(t => t[0] == '-').map(t => t.slice(1));
-	return this.index.search(ptags.join(' '), {bool: 'AND'})
+	return this.items.search(ptags.join(' '), {bool: 'AND'})
 		.map(r => this.docs.getDoc(r.ref))
 		.filter(doc => ntags.every(nt => doc.tags.indexOf(nt) == -1))
 		.map(doc => {
@@ -84,6 +115,12 @@ function get(text) {
 			return (body.slice(0, sep).split(' ').filter(t => !!t && ptags.indexOf(t.toLowerCase()) == -1).join(' ') + body.slice(sep)).trim();		
 		});
 }
+
+function hint(text) {
+	return this.tags.search(text, {expand: true}).map(t => t.ref);
+}
+
+
 
 
 	
