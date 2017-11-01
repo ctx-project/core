@@ -12,7 +12,7 @@ module.exports = function(path) {
 	this.put = put.bind(this);
 	this.get = get.bind(this);
 	this.onPut = null;
-	this.hint = hint.bind(this);
+	this.hints = hints.bind(this);
 
 	// var docs = this.docs.docs;
 	// for(var docid in docs) {
@@ -116,7 +116,7 @@ function get(text) {
 		});
 }
 
-function hint(text) {
+function hints(text) {
 	return this.tags.search(text, {expand: true}).map(t => t.ref);
 }
 
