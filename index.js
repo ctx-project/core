@@ -1,6 +1,10 @@
 var l = function(o) {console.log(o); return o;},
 		elasticlunr = require('elasticlunr'),
-		fs = require('fs');
+		fs = require('fs'),
+		lang = require('@ctx/language'),
+		parse = lang.parse,
+		compose = lang.compose,
+		serializeItem = compose.getItemSerializer();
 
 module.exports = function(path) {
 	this.path = path;
@@ -54,8 +58,13 @@ function save(core) {
 	}));
 }
 
+function hints(word) {
+	return this.tags.search(word, {expand: true}).map(t => t.ref);
+}
+
 function put(text) {
 	if(!text) return null;
+	
 	var words = text.trim().split(' ').filter(w => !!w),
 			tags = words.filter(w => {var l = w[0]; return l != '~' && l == l.toUpperCase() && isNaN(l);}).map(t => t.toLowerCase()),
 			maybeId = words[words.length - 1],
@@ -101,25 +110,26 @@ function put(text) {
 	return '~' + id;
 }
 
-function get(text) {
-	// l(this.docs.docs); return; 
-	var tags = text.split(' ').filter(w => !!w).map(t => t.toLowerCase()),
-			ptags = tags.filter(t => t[0] != '-'),
-			ntags = tags.filter(t => t[0] == '-').map(t => t.slice(1));
+function get(item) {
+	// return [JSON.stringify(parse.item('-Cuc', ['tags', 'sign']))];
+	// if(!item.trim()) {
+	// 	// var docs = this.docs.docs;
+	// 	// for(var docid in docs) {
+	// 	// 	 this.put(docs[docid].body);
+	// 	// }
+	// 	return Object.keys(this.tags.documentStore.docs);
+	// }
+	// // l(this.docs.docs); return; 
+	// return ['a', 'b'];
+	var record = parse.item(item, ['tags', 'case', 'sign']),
+			ptags = record.positiveTags.map(t => t.body),
+			ntags = record.negativeTags.map(t => t.body);
+
 	return this.items.search(ptags.join(' '), {bool: 'AND'})
 		.map(r => this.docs.getDoc(r.ref))
 		.filter(doc => ntags.every(nt => doc.tags.indexOf(nt) == -1))
-		.map(doc => {
-			var	body = doc.body,
-					sep = body.search(/(^|\s+)[^A-Z\s\*]/);
-			return (body.slice(0, sep).split(' ').filter(t => !!t && ptags.indexOf(t.toLowerCase()) == -1).join(' ') + body.slice(sep)).trim();		
-		});
+		.map(doc => serializeItem(compose.removeFromHead(parse.item(doc.body, ['tags']), ptags)));
 }
-
-function hints(text) {
-	return this.tags.search(text, {expand: true}).map(t => t.ref);
-}
-
 
 
 
