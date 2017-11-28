@@ -9,23 +9,15 @@ var l = function(o) {console.log(o); return o;},
 module.exports = function(path) {
 	this.path = path;
 	var store = load(path);
-	this.items = store.items;
+	this.itemIndex = store.items;
 	this.nextId = store.nextId;
-	this.tags = store.tags;
-	this.docs = this.items.documentStore;
+	this.tagIndex = store.tags;
+	this.itemDocs = this.itemIndex.documentStore;
+	this.tagDocs = this.tagIndex.documentStore;
 	this.put = put.bind(this);
 	this.get = get.bind(this);
 	this.onPut = null;
 	this.hints = hints.bind(this);
-
-	// var docs = this.docs.docs;
-	// for(var docid in docs) {
-	// 	this.put(docs[docid].body);
-	// }
-	
-	// // l(this.tags.toJSON());
-	// save(this);
-	// // l(this.items.toJSON());
 };	
 
 function load(path) {
@@ -52,58 +44,49 @@ function load(path) {
 
 function save(core) {
 	fs.writeFile(core.path, JSON.stringify({
-		items: core.items.toJSON(),
+		items: core.itemIndex.toJSON(),
 		nextId: core.nextId,
-		tags: core.tags.toJSON()
+		tags: core.tagIndex.toJSON()
 	}));
 }
 
 function hints(word) {
-	return this.tags.search(word, {expand: true}).map(t => t.ref);
+	return this.tagIndex.search(word, {expand: true}).map(t => t.ref);
 }
 
-function put(text) {
-	if(!text) return null;
+function put(item) {
+	if(!item.trim()) return '';
 	
-	var words = text.trim().split(' ').filter(w => !!w),
-			tags = words.filter(w => {var l = w[0]; return l != '~' && l == l.toUpperCase() && isNaN(l);}).map(t => t.toLowerCase()),
-			maybeId = words[words.length - 1],
-			id = maybeId.startsWith('~') && maybeId.length > 1 ? maybeId.slice(1) : null,
-			idExists = id ? this.docs.hasDoc(id) : false;
+	var record = parse.item(item, ['tags', 'case', 'signature']),
+			signature = record.signature,
+			id = record.id,
+			idExists = id ? this.itemDocs.hasDoc(id) : false;
 	
-	tags.forEach(function(tag) {
-		if(this.tags.documentStore.hasDoc(tag)) return;
-		this.tags.addDoc({tag: tag, parts: tag.split(/[\.:]+/)});	
+	record.tags.forEach(function(tag) {
+		if(this.tagDocs.hasDoc(tag.name)) return;
+		this.tagIndex.addDoc({tag: tag.name, parts: tag.parts});	
 	}.bind(this));
 	
-	function subtags(sep) {
-		tags.filter(t => t.indexOf(sep) != -1).forEach(ct => Array.prototype.push.apply(tags, ct.split(sep).filter(t => !isNaN(+t))));
-	}
-	subtags(':');
-	subtags('.');
-
-	if(!tags.length) tags.push('untagged');
+	if(!signature.length) signature.push('untagged');
 	
-	// l(text);	l(words);	l(tags);	l(maybeId);	l(id);	l(idExists);	return '';
-
 	if(idExists)
-		if(words.length == 1)
-			this.items.removeDocByRef(id);
+		if(record.remove)
+			this.itemIndex.removeDocByRef(id);
 		else
-			this.items.updateDoc({id: id, tags: tags, body: text});
+			this.itemIndex.updateDoc({id, tags: signature, body: item});
 	else 
-		if(id && words.length == 1)
+		if(record.remove)
 			return;
 		else {
 			if(!id) {
 				id = this.nextId++;	
-				text += ' ~' + id;
+				item += ' ~' + id;
 			}
 			
-			this.items.addDoc({id: id, tags: tags, body: text});
+			this.itemIndex.addDoc({id: id, tags: signature, body: item});
 		}
 	
-	if(this.onPut) setTimeout(() => this.onPut(text));
+	if(this.onPut) setTimeout(() => this.onPut(item));
 	
 	save(this);
 	
@@ -111,22 +94,25 @@ function put(text) {
 }
 
 function get(item) {
+	if(!item.trim()) return [];
 	// return [JSON.stringify(parse.item('-Cuc', ['tags', 'sign']))];
 	// if(!item.trim()) {
-	// 	// var docs = this.docs.docs;
-	// 	// for(var docid in docs) {
-	// 	// 	 this.put(docs[docid].body);
+	// 	// var itemDocs = this.itemDocs.itemDocs;
+	// 	// for(var docid in itemDocs) {
+	// 	// 	 this.put(itemDocs[docid].body);
 	// 	// }
-	// 	return Object.keys(this.tags.documentStore.docs);
+	// 	return Object.keys(this.tagIndex.documentStore.itemDocs);
 	// }
-	// // l(this.docs.docs); return; 
+	// // l(this.itemDocs.itemDocs); return; 
 	// return ['a', 'b'];
+	
+	
 	var record = parse.item(item, ['tags', 'case', 'sign']),
 			ptags = record.positiveTags.map(t => t.body),
 			ntags = record.negativeTags.map(t => t.body);
 
-	return this.items.search(ptags.join(' '), {bool: 'AND'})
-		.map(r => this.docs.getDoc(r.ref))
+	return this.itemIndex.search(ptags.join(' '), {bool: 'AND'})
+		.map(r => this.itemDocs.getDoc(r.ref))
 		.filter(doc => ntags.every(nt => doc.tags.indexOf(nt) == -1))
 		.map(doc => serializeItem(compose.removeFromHead(parse.item(doc.body, ['tags']), ptags)));
 }
