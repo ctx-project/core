@@ -61,7 +61,7 @@ function put(item) {
 			signature = record.signature,
 			id = record.id,
 			idExists = id ? this.itemDocs.hasDoc(id) : false;
-	
+
 	record.tags.forEach(function(tag) {
 		if(this.tagDocs.hasDoc(tag.name)) return;
 		this.tagIndex.addDoc({tag: tag.name, parts: tag.parts});	
@@ -106,6 +106,7 @@ function get(item) {
 	// // l(this.itemDocs.itemDocs); return; 
 	// return ['a', 'b'];
 	
+	item = item.replace(/\w\S*/g, function(txt){return txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase();});
 	
 	var record = parse.item(item, ['tags', 'case', 'sign']),
 			ptags = record.positiveTags.map(t => t.body),
