@@ -14,8 +14,9 @@ module.exports = function(path) {
 	this.tagIndex = store.tags;
 	this.itemDocs = this.itemIndex.documentStore;
 	this.tagDocs = this.tagIndex.documentStore;
-	this.put = put.bind(this);
 	this.get = get.bind(this);
+	this.head = head.bind(this);
+	this.put = put.bind(this);
 	this.onPut = null;
 	this.hints = hints.bind(this);
 };	
@@ -54,6 +55,28 @@ function hints(word) {
 	return this.tagIndex.search(word, {expand: true}).map(t => t.ref);
 }
 
+function get(item, flags = {}) {
+	if(!item.trim()) return [];
+
+	item = item.replace(/\w\S*/g, function(txt){return txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase();});
+	
+	var record = parse.item(item, ['tags', 'case', 'sign']),
+			ptags = record.positiveTags.map(t => t.body),
+			ntags = record.negativeTags.map(t => t.body),
+			docs = 	this.itemIndex.search(ptags.join(' '), {bool: 'AND'})
+							.map(r => this.itemDocs.getDoc(r.ref));
+							
+	docs = flags.exact ? 
+						docs.filter(doc => doc.tags.every(t => t.startsWith('*') || ptags.indexOf(t) != -1)) :
+						docs.filter(doc => ntags.every(nt => doc.tags.indexOf(nt) == -1));
+						
+	return docs.map(doc => serializeItem(compose.removeFromHead(parse.item(doc.body, ['tags']), ptags)));
+}
+
+function head(item, flags = {}) {
+	return [!!(get.bind(this))(item, flags).length];
+}
+
 function put(item) {
 	if(!item.trim()) return '';
 	
@@ -76,7 +99,7 @@ function put(item) {
 			this.itemIndex.updateDoc({id, tags: signature, body: item});
 	else 
 		if(record.remove)
-			return;
+			return [];
 		else {
 			if(!id) {
 				id = this.nextId++;	
@@ -90,32 +113,7 @@ function put(item) {
 	
 	save(this);
 	
-	return '~' + id;
-}
-
-function get(item) {
-	if(!item.trim()) return [];
-	// return [JSON.stringify(parse.item('-Cuc', ['tags', 'sign']))];
-	// if(!item.trim()) {
-	// 	// var itemDocs = this.itemDocs.itemDocs;
-	// 	// for(var docid in itemDocs) {
-	// 	// 	 this.put(itemDocs[docid].body);
-	// 	// }
-	// 	return Object.keys(this.tagIndex.documentStore.itemDocs);
-	// }
-	// // l(this.itemDocs.itemDocs); return; 
-	// return ['a', 'b'];
-	
-	item = item.replace(/\w\S*/g, function(txt){return txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase();});
-	
-	var record = parse.item(item, ['tags', 'case', 'sign']),
-			ptags = record.positiveTags.map(t => t.body),
-			ntags = record.negativeTags.map(t => t.body);
-
-	return this.itemIndex.search(ptags.join(' '), {bool: 'AND'})
-		.map(r => this.itemDocs.getDoc(r.ref))
-		.filter(doc => ntags.every(nt => doc.tags.indexOf(nt) == -1))
-		.map(doc => serializeItem(compose.removeFromHead(parse.item(doc.body, ['tags']), ptags)));
+	return ['~' + id];
 }
 
 
