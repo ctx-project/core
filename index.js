@@ -101,10 +101,8 @@ function put(item) {
 		if(record.remove)
 			return [];
 		else {
-			if(!id) {
-				id = this.nextId++;	
-				item += ' ~' + id;
-			}
+			id = this.nextId++;	
+			item += ' ~' + id;
 			
 			this.itemIndex.addDoc({id: id, tags: signature, body: item});
 		}
