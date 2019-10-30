@@ -58,8 +58,6 @@ function hints(word) {
 function get(item, flags = {}) {
 	if(!item.trim()) return [];
 
-	item = item.replace(/\w\S*/g, function(txt){return txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase();});
-	
 	var record = parse.item(item, ['tags', 'case', 'sign']),
 			ptags = record.positiveTags.map(t => t.body),
 			ntags = record.negativeTags.map(t => t.body),
